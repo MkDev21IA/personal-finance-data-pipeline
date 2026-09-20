@@ -1,13 +1,14 @@
 @echo off
-title Pipeline Financeiro - Banco Inter
+chcp 65001 >nul
+title Financial Automation Pipeline
 color 0A
 
 echo ===================================================
-echo   INICIANDO AMBIENTE LINUX (WSL) E PIPELINE...
+echo   INITIALIZING LINUX (WSL) PIPELINE ENVIRONMENT...
 echo ===================================================
 echo.
 
-REM Descobre o diretorio atual do script no formato WSL e executa o orquestrador
+REM Resolve current script directory in WSL format and execute orchestrator
 wsl bash -c "cd $(wslpath '%~dp0..') && source venv/bin/activate && python main.py"
 
 pause >nul

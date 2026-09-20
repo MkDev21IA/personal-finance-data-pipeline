@@ -1,84 +1,94 @@
+import sys
 import sqlite3
 from datetime import datetime
-from dateutil.relativedelta import relativedelta  # Para somar meses facilmente
+from dateutil.relativedelta import relativedelta
 import hashlib
 
-def parcelar_transacao_manual(id_hash_original, num_parcelas):
-    conn = sqlite3.connect("meu_dinheiro.db")
+# Ensures terminal uses UTF-8 and replaces invalid characters
+if hasattr(sys.stdin, 'reconfigure'):
+    sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+def split_transaction_installments(original_id_hash: str, num_installments: int, db_path: str = "meu_dinheiro.db"):
+    """Splits an existing one-off transaction into future monthly installments."""
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # 1. Busca a transação original
-    cursor.execute("SELECT data_transacao, descricao, valor, tipo_conta, categoria FROM transacoes WHERE id_hash = ?", (id_hash_original,))
-    transacao = cursor.fetchone()
+    # 1. Fetch original transaction
+    cursor.execute("SELECT data_transacao, descricao, valor, tipo_conta, categoria FROM transacoes WHERE id_hash = ?", (original_id_hash,))
+    transaction = cursor.fetchone()
     
-    if not transacao:
-        print("[X] Transação não encontrada!")
+    if not transaction:
+        print("[X] Transaction not found!")
         conn.close()
         return
 
-    data_str, desc, valor_total, tipo_conta, categoria = transacao
+    data_str, desc, total_amount, tipo_conta, categoria = transaction
     
-    # 2. Calcula o valor de cada parcela
-    valor_parcela = valor_total / num_parcelas
-    data_base = datetime.strptime(data_str, "%Y-%m-%d") # Ajuste para o formato da sua data no banco
+    # 2. Compute installment value
+    installment_amount = total_amount / num_installments
+    base_date = datetime.strptime(data_str, "%Y-%m-%d")
     
-    print(f"[*] Parcelando '{desc}' de R$ {valor_total:.2f} em {num_parcelas}x de R$ {valor_parcela:.2f}...")
+    print(f"[*] Splitting '{desc}' (R$ {total_amount:.2f}) into {num_installments} installments of R$ {installment_amount:.2f}...")
 
-    # 3. Atualiza a primeira parcela na transação original (adicionando (1/X) na descrição)
-    desc_parcelada_1 = f"{desc} (1/{num_parcelas})"
+    # 3. Update original transaction as installment 1
+    desc_installment_1 = f"{desc} (1/{num_installments})"
     cursor.execute("""
         UPDATE transacoes 
         SET valor = ?, descricao = ? 
         WHERE id_hash = ?
-    """, (valor_parcela, desc_parcelada_1, id_hash_original))
+    """, (installment_amount, desc_installment_1, original_id_hash))
 
-    # 4. Cria as transações futuras para os próximos meses
-    for i in range(2, num_parcelas + 1):
-        nova_data = data_base + relativedelta(months=(i - 1))
-        nova_data_str = nova_data.strftime("%Y-%m-%d")
-        nova_desc = f"{desc} ({i}/{num_parcelas})"
+    # 4. Generate future installment records
+    for i in range(2, num_installments + 1):
+        new_date = base_date + relativedelta(months=(i - 1))
+        new_date_str = new_date.strftime("%Y-%m-%d")
+        new_desc = f"{desc} ({i}/{num_installments})"
         
-        # Gera um hash único para a parcela futura
-        novo_hash = hashlib.sha256(f"{nova_data_str}{nova_desc}{valor_parcela}{tipo_conta}".encode()).hexdigest()
+        new_hash = hashlib.sha256(f"{new_date_str}{new_desc}{installment_amount}{tipo_conta}".encode()).hexdigest()
         
         cursor.execute("""
             INSERT OR IGNORE INTO transacoes (id_hash, data_transacao, descricao, valor, tipo_conta, categoria, saldo_conta)
             VALUES (?, ?, ?, ?, ?, ?, 0)
-        """, (novo_hash, nova_data_str, nova_desc, valor_parcela, tipo_conta, categoria))
+        """, (new_hash, new_date_str, new_desc, installment_amount, tipo_conta, categoria))
 
     conn.commit()
     conn.close()
-    print("[+] Parcelamento aplicado com sucesso no banco de dados!")
+    print("[+] Installments successfully recorded in database!")
+
+# Compatibility alias
+parcelar_transacao_manual = split_transaction_installments
 
 if __name__ == "__main__":
     print("===================================================")
-    print("         GERENCIADOR DE PARCELAMENTOS")
+    print("         INSTALLMENT TRANSACTION MANAGER")
     print("===================================================\n")
-    print("Dica: Obtenha o id_hash diretamente pelo Metabase.\n")
+    print("Tip: Retrieve transaction id_hash directly from Metabase.\n")
     
     while True:
-        escolha_hash = input("Cole o ID_HASH da transação (ou 'S' para sair): ").strip()
+        chosen_hash = input("Paste transaction ID_HASH (or 'Q' to quit): ").strip()
         
-        if escolha_hash.upper() == 'S':
-            print("\n[*] Encerrando o gerenciador de parcelamentos...")
+        if chosen_hash.upper() in ('Q', 'QUIT', 'S'):
+            print("\n[*] Exiting installment manager...")
             break
         
-        if not escolha_hash:
-            print("[!] O ID_HASH não pode estar vazio. Tente novamente.\n")
+        if not chosen_hash:
+            print("[!] ID_HASH cannot be empty. Please try again.\n")
             continue
             
         try:
-            num = int(input("Informe o número total de parcelas (ex: 5): ").strip())
+            num = int(input("Enter total number of installments (e.g. 5): ").strip())
             if num <= 1:
-                print("[!] O número de parcelas deve ser maior que 1.\n")
+                print("[!] Number of installments must be greater than 1.\n")
                 continue
                 
-            parcelar_transacao_manual(escolha_hash, num)
+            split_transaction_installments(chosen_hash, num)
             print("-" * 50)
             
         except ValueError:
-            print("[X] Entrada inválida. Digite um número inteiro para as parcelas.\n")
+            print("[X] Invalid input. Please enter an integer.\n")
         except Exception as e:
-            print(f"\n[X] Erro ao processar o parcelamento: {e}\n")
+            print(f"\n[X] Error processing installments: {e}\n")
         
-        print() # Espaço para a próxima interação do loop
+        print()

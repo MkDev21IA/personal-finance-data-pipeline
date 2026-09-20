@@ -1,61 +1,176 @@
-# 🏦 Extrator de Finanças Inter (Local Data Pipeline)
+# 🏦 Automated Personal Finance Data Pipeline (ETL & BI)
 
-> **Pipeline de extração local para automação de extratos do Banco Inter. Desenvolvido para garantir privacidade total dos dados financeiros, sem depender de APIs de terceiros, planilhas manuais ou plataformas em nuvem.**
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Playwright](https://img.shields.io/badge/Playwright-Automated_Scraping-green?logo=playwright&logoColor=white)](https://playwright.dev/)
+[![SQLite](https://img.shields.io/badge/Database-SQLite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+[![Docker](https://img.shields.io/badge/Docker-Metabase_BI-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Nenhuma empresa terceirizada precisa ter acesso ao seu extrato bancário. Este projeto utiliza Engenharia de Dados local para acessar sua conta (via QR Code seguro), extrair os dados, processá-los e disponibilizá-los em um painel de Business Intelligence (Metabase) rodando inteiramente na sua máquina.
+> **A privacy-first, local ETL pipeline and Business Intelligence solution for personal finance.**  
+> Automatically ingests, cleans, deduplicates, and categorizes financial transactions from multiple financial institutions (Banco Inter and C6 Bank) into a local SQLite warehouse visualized via self-hosted Metabase dashboards.
 
-## ⚙️ Arquitetura do Projeto
+---
 
-1. **Camada de Extração (Playwright):** Um robô com navegação isolada acessa o Internet Banking de forma segura, contornando a ausência de APIs abertas e exibindo uma interface de status enquanto extrai o CSV em background.
-2. **Camada ETL (Pandas):** Limpeza dos dados brutos do banco, normalização de datas e geração de Hashes MD5 para garantir que transações não sejam duplicadas no banco de dados (Idempotência).
-3. **Motor de Regras Relacional (SQLite) & Parcelamento:** 
-* Sistema interativo via terminal (CLI) para categorização automática.
-* Módulo isolado (manage_portions.py com suporte a loop) para desmembrar compras parceladas avulsas no banco.
-4. **Camada Analítica (Metabase via Docker):** Painel de BI plugado no banco de dados local para geração de insights orçamentários avançados.
+## 🏗️ Architecture Overview
 
-## 🚀 Como usar
+```mermaid
+flowchart TD
+    subgraph Sources["1. Multi-Bank Data Sources"]
+        InterWeb["Banco Inter (Web Banking)<br/>Playwright Automation"]
+        InterPDF["Banco Inter (PDF Invoices)<br/>pdfplumber Extraction"]
+        C6CSV["C6 Bank (CSV Exports)<br/>Account & Card Statements"]
+    end
 
-### Pré-requisitos
-* Python 3.10+
-* Windows Subsystem for Linux (WSL) ou ambiente Linux/macOS nativo
-* Docker (para subir o painel analítico do Metabase)
+    subgraph Pipeline["2. Data Engineering & ETL (Pandas)"]
+        Ingestion["File Ingestion & Routing<br/>downloads/"]
+        Normalization["Schema Normalization<br/>(ISO Dates, Standard Amounts)"]
+        Deduplication["Idempotency Engine<br/>MD5(date + description + amount)"]
+        RulesEngine["Rules-Based Categorizer<br/>Keyword Matching by Cash Flow"]
+    end
 
-### 1. Instalação
-Clone este repositório e acesse a pasta:
-```bash
-git clone [https://github.com/seu-usuario/extrator-financas-inter.git](https://github.com/seu-usuario/extrator-financas-inter.git)
-cd extrator-financas-inter
+    subgraph Storage["3. Local Data Warehouse"]
+        SQLite[("SQLite Warehouse<br/>meu_dinheiro.db")]
+        TransTable["Table: transacoes<br/>(INSERT OR IGNORE)"]
+        RulesTable["Table: regras_categorizacao"]
+        SQLite --> TransTable
+        SQLite --> RulesTable
+    end
+
+    subgraph Analytics["4. Analytics & Business Intelligence"]
+        Docker["Docker Container<br/>metabase/metabase:latest"]
+        Metabase["Metabase BI Dashboard<br/>Cash Flows, Spending, Budgets"]
+        Docker --> Metabase
+    end
+
+    InterWeb --> Ingestion
+    InterPDF --> Ingestion
+    C6CSV --> Ingestion
+    Ingestion --> Normalization
+    Normalization --> Deduplication
+    Deduplication --> RulesEngine
+    RulesEngine --> SQLite
+    SQLite --> Docker
 ```
 
-Crie e ative um ambiente virtual: 
-```bash
-python -m venv venv
-source venv/bin/activate  # ou venv\Scripts\activate no Windows
+---
+
+## 🌟 Key Engineering Highlights
+
+- **100% Local & Privacy-Preserving**: No third-party open-banking aggregators or cloud platforms have access to your financial data. All computations and storage happen entirely on your workstation.
+- **Strict Idempotency**: Transactions generate a deterministic MD5 hash:
+  $$\text{id\_hash} = \text{MD5}(\text{date} + \text{description} + \text{amount})$$
+  Ensures zero duplicate transactions in the data warehouse, even when re-processing overlapping statements or running pipelines repeatedly (`INSERT OR IGNORE`).
+- **Multi-Source & Multi-Format Ingestion**:
+  - **Banco Inter**: Automated Playwright widget with QR code authentication for checking accounts, alongside robust `pdfplumber` parsing for multi-page PDF credit card bills.
+  - **C6 Bank**: Automated ingestion of manually dropped CSV statements and credit card sheets, identified by content sniffing.
+- **Fault-Tolerant & Resilient Pipeline**: Each input file is processed in an isolated `try/except` block. Failure in one bank or format never crashes data extraction from the others. Original source files are deleted **only after confirmed database commit**.
+- **Interactive Rules & Category Engine**: Includes a terminal CLI for training keyword-to-category rules, handling installment transaction splitting (`manage_portions.py`), and immediate category overrides (`correct_category.py`).
+- **Healthcheck-Driven BI Orchestration**: Windows `.bat` and Linux `.sh` execution scripts automatically manage container lifecycles and poll HTTP health endpoints (`/api/health`) before launching dashboards.
+
+---
+
+## 📁 Repository Structure
+
+```text
+├── inter_crawler.py        # Playwright automation for Banco Inter web banking
+├── etl_processor.py        # Core ETL: CSV/PDF parsers, MD5 hashing, database upsert
+├── main.py                 # CLI pipeline orchestrator
+├── train_rules.py          # Interactive CLI for orphan transaction categorization
+├── correct_category.py     # Utility for manual category overrides by transaction hash
+├── manage_portions.py      # Utility for splitting one-off purchases into future installments
+├── requirements.txt        # Python project dependencies
+├── .env.example             # Template for external folder paths
+├── execution_examples/      # Windows (.bat) and Linux/macOS (.sh) launch scripts
+│   ├── start_pipeline.sh
+│   ├── start_pipeline.bat
+│   ├── correct_category.sh
+│   ├── correct_category.bat
+│   ├── manage_installments.sh
+│   └── manage_installments.bat
+└── README.md                # Project documentation
 ```
 
-Instale as dependências e os binários do navegador para automação: 
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- **Python 3.10+**
+- **Docker Desktop** (or native Docker daemon on Linux)
+- **Windows Subsystem for Linux (WSL)** or native Linux/macOS
+
+### 1. Installation
+
+Clone this repository and create a virtual environment:
+
+```bash
+git clone https://github.com/your-username/personal-finance-data-pipeline.git
+cd personal-finance-data-pipeline
+
+python3 -m venv venv
+source venv/bin/activate  # On Windows without WSL: venv\Scripts\activate
+```
+
+Install dependencies and browser binaries for Playwright:
+
 ```bash
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 2. Execução do Pipeline
-Basta rodar o orquestrador principal. Ele guiará você por todo o processo (Extração, ETL e Treinamento) no terminal:
+### 2. Configuration
+
+Copy the sample environment file:
+
+```bash
+cp .env.example .env
+```
+
+Configure the paths to your local statement folders in `.env`:
+
+```env
+C6_STATEMENTS_PATH="/path/to/your/C6_Statements"
+INTER_INVOICES_PATH="/path/to/your/Inter_Invoices"
+```
+
+### 3. Running the Pipeline
+
+Run the main orchestrator script:
+
 ```bash
 python main.py
 ```
-*(Dica: Se estiver utilizando o Windows com WSL, você pode criar um arquivo `.bat` apontando para o script de inicialização local para automatizar a chamada — Tem exemplos na pasta exemplos_execucao).*
 
-### 3. Gerenciamento de Parcelamentos Manuais
-Caso precise desmembrar uma compra parcelada:
+The CLI will prompt you to:
+1. Select statement period (7, 15, 30, or 90 days).
+2. Scan the Banco Inter login QR code in the browser window.
+3. Automatically process, deduplicate, and load all transactions into SQLite.
+4. Optionally classify any new uncategorized transactions.
 
-1. Pegue o `id_hash` da transação no Metabase.
-2. Execute o atalho correspondente: `parcelar.bat` (Windows) ou `./parcelar.sh` (Linux/macOS).
-3. Cole o hash e informe o número de parcelas (o script aceita múltiplos hashes em sequência).
+Alternatively, use the ready-to-run automation scripts in `execution_examples/`.
 
+---
 
-### 4. Visualização (Metabase)
-Com o banco de dados (`meu_dinheiro.db`) alimentado pelo script, suba o container do Metabase mapeando a pasta atual do seu projeto:
+## 🛠️ CLI Utilities
+
+### Manual Installment Splitting (`manage_portions.py`)
+Splits large one-off purchases into monthly installments:
+1. Retrieve the transaction `id_hash` from Metabase or SQLite.
+2. Run `python manage_portions.py` (or execute `manage_installments.bat`).
+3. Enter the `id_hash` and the number of installments (e.g. 10). The script will adjust installment 1 and generate future dated records with unique hashes.
+
+### Category Override (`correct_category.py`)
+Fixes misclassified entries without direct database queries:
+1. Retrieve the transaction `id_hash`.
+2. Run `python correct_category.py` (or execute `correct_category.bat`).
+3. Enter the `id_hash` and the corrected category name.
+
+---
+
+## 📊 Business Intelligence (Metabase)
+
+Start the Metabase container with persistent database mapping:
 
 ```bash
 docker run -d -p 3000:3000 \
@@ -64,10 +179,14 @@ docker run -d -p 3000:3000 \
   metabase/metabase:latest
 ```
 
-1. Abra o navegador e acesse `http://localhost:3000`.
-2. Crie sua conta de administrador local (funciona offline).
-3. Adicione o seu banco de dados selecionando o tipo **SQLite**.
-4. No campo **Caminho do Arquivo (Filename)**, digite o caminho interno mapeado no container: `/dados_projeto/meu_dinheiro.db`.
+1. Open your browser at `http://localhost:3000`.
+2. Complete the initial local admin setup.
+3. Add a new database: select **SQLite**.
+4. In the **Database file path** field, input: `/dados_projeto/meu_dinheiro.db`.
+5. Build dashboards for monthly burn rate, categorized spending, cash inflows, and trend analyses.
 
-## 🔒 Segurança e Privacidade
-O projeto roda **100% offline** (exceto pela conexão estrita com o site do banco para o download). Seus dados nunca saem da sua máquina. O Metabase é conteinerizado para ler exclusivamente o arquivo SQLite local gerado na sua pasta.
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).

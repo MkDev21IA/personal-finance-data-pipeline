@@ -1,7 +1,8 @@
 #!/bin/bash
 echo "==================================================="
-echo "  INICIANDO GERENCIADOR DE PARCELAMENTOS..."
+echo "  STARTING LOCAL FINANCIAL PIPELINE..."
 echo "==================================================="
 
+# Activate virtual environment and run main pipeline
 source venv/bin/activate
-python parcelamento.py
+python main.py

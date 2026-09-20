@@ -1,8 +1,7 @@
 #!/bin/bash
 echo "==================================================="
-echo "  INICIANDO PIPELINE FINANCEIRO LOCAL..."
+echo "  STARTING INSTALLMENT MANAGER..."
 echo "==================================================="
 
-# Ativa o ambiente virtual e roda o projeto
 source venv/bin/activate
-python main.py
+python manage_portions.py
